@@ -153,6 +153,11 @@ class RolloutConfig:
   # Whether to enable deterministic sampling for SG-Lang JAX rollout engine.
   rollout_sglang_jax_enable_deterministic_sampling: bool = False
 
+  # Custom reshard functions
+  reshard_fn: Any = None
+
+  
+
 
 class BaseRollout(ABC):
   """Base RolloutWorker."""

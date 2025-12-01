@@ -66,6 +66,7 @@ class VllmConfig:
   async_scheduling: bool = False
   tensor_parallel_size: int = -1
   data_parallel_size: int = -1
+  reshard_fn: Any = None
 
 
 class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
@@ -96,7 +97,7 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
 
     # vLLM DP only works with the new model design
     if config.data_parallel_size > 1:
-      os.environ["NEW_MODEL_DESIGN"] = "True"
+      os.environ["NEW_MODEL_DESIGN"] = "1"
 
     # tpu-inference backend recently removed this environment variable, however
     # still set it here for backward compatibility.
@@ -115,7 +116,8 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
       atexit.register(self.stop)
     else:
       self.llm = LLM(**self.args)
-
+    
+    self.reshard_fn = config.reshard_fn if config.reshard_fn else reshard.reshard
     self.to_hf_key_mappings = dict(config.mapping_config.to_hf_mappings or {})
     self.to_hf_transpose_keys = config.mapping_config.to_hf_transpose_keys
     self.to_hf_hook_fns = config.mapping_config.to_hf_hook_fns
@@ -139,7 +141,7 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
         key_mappings=self.to_hf_key_mappings,
         key_mapping_hook_fns=self.to_hf_hook_fns,
         transpose_keys=self.to_hf_transpose_keys,
-        reshard_fn=reshard.reshard_pytree,
+        reshard_fn=self.reshard_fn,
     )
 
   def load_checkpoint(self, path_or_weights: str | jaxtyping.PyTree):
