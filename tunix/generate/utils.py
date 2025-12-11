@@ -15,9 +15,9 @@
 
 """Utility functions for sampler."""
 
+import inspect
 import functools
 import gc
-import inspect
 import logging
 import math
 import re
@@ -325,70 +325,6 @@ def get_logprobs_from_vllm_output(
   return extracted
 
 
-def build_flat_dict(
-    flat_state: Iterator[tuple[tuple[str, ...], nnx.State]],
-    mappings: Dict[str, tuple[str, tuple[int, ...]]],
-):
-  """Build a new flat dictionary from the flat state using the provided mappings.
-
-  Args:
-    flat_state: A list of tuples, where each tuple contains the nested keys and
-      the corresponding value.
-    mappings: A dictionary defining how to map keys from the source state to the
-      target state. The keys of the dictionary are the source keys, and the
-      values are tuples containing the target key and the sharding information.
-
-  Returns:
-    A new flat dictionary with the mapped keys and values.
-  """
-  new_flat_dict = {}
-  for keys, v in flat_state:
-    path = '.'.join(str(key) for key in keys)
-    mapped = False
-    for src, (tgt, sharding) in mappings.items():
-      regex = '^' + re.escape(tgt).replace('\\.\\*', r'\.(\d+)') + '$'
-      matched = re.match(regex, path)
-      if matched:
-        # Extract wildcards if any
-        wildcards = matched.groups()
-        src_parts = []
-        wc_index = 0
-        for part in src.split('.'):
-          if part == '*':
-            src_parts.append(wildcards[wc_index])
-            wc_index += 1
-          else:
-            src_parts.append(part)
-        actual_src = '.'.join(src_parts)
-        # Check if this is a scanned parameter (has 'layer' in sharding spec)
-        if sharding and 'layer' in sharding:
-          if actual_src not in new_flat_dict:
-            new_flat_dict[actual_src] = ([], [], sharding)
-          layer_number = int(matched.groups()[0])
-          new_flat_dict[actual_src][0].append((layer_number, v))
-          new_flat_dict[actual_src][1].append((layer_number, path))
-        else:
-          # Regular (non-scanned) parameter
-          new_flat_dict[actual_src] = v, path, sharding
-
-        mapped = True
-        break
-    # There are no mappings for rng related params.
-    if not mapped:
-      logging.warning('!!! No mapping for flat state: %s', path)
-
-  # Sort layers
-  for key, (layers, paths, sharding) in new_flat_dict.items():
-    if isinstance(layers, list):
-      layers.sort(key=lambda x: x[0])
-      paths.sort(key=lambda x: x[0])
-      values = [v for _, v in layers]
-      paths = [p for _, p in paths]
-      new_flat_dict[key] = (values, paths, sharding)
-
-  return new_flat_dict
-
-
 def build_flat_dict_interleaved(
     flat_state: Iterator[tuple[tuple[str, ...], nnx.State]],
     mappings: Dict[str, tuple[str, tuple[int, ...]]],
@@ -485,6 +421,88 @@ def build_flat_dict_interleaved(
       paths.sort(key=lambda x: x[0])
 
       # Flatten lists back to simple arrays
+      values = [v for _, v in layers]
+      paths = [p for _, p in paths]
+      new_flat_dict[key] = (values, paths, sharding)
+
+  return new_flat_dict
+
+
+def _process_key_mapping(
+    key_mappings,
+) -> tuple[Dict[str, tuple[str, tuple[int, ...]]], bool]:
+  """Process key mappings and additional configs."""
+  # Check for additional configs that may require interleaved mapping, for MoE
+  # models like GPT_OSS
+  is_interleaved = False
+  if 'additional_config' in key_mappings:
+    additional_configs = key_mappings['additional_config']
+    logging.info('Additional configs: %s', additional_configs)
+    if additional_configs.get('layer_cycle_interval', 1) > 1:
+       is_interleaved = True
+  processed_mappings = key_mappings.copy()
+  # remove additional_config from key_mappings
+  del processed_mappings['additional_config']
+  return processed_mappings, is_interleaved
+
+
+def build_flat_dict(
+    flat_state: Iterator[tuple[tuple[str, ...], nnx.State]],
+    mappings: Dict[str, tuple[str, tuple[int, ...]]],
+):
+  """Build a new flat dictionary from the flat state using the provided mappings.
+
+  Args:
+    flat_state: A list of tuples, where each tuple contains the nested keys and
+      the corresponding value.
+    mappings: A dictionary defining how to map keys from the source state to the
+      target state. The keys of the dictionary are the source keys, and the
+      values are tuples containing the target key and the sharding information.
+
+  Returns:
+    A new flat dictionary with the mapped keys and values.
+  """
+  new_flat_dict = {}
+  for keys, v in flat_state:
+    path = '.'.join(str(key) for key in keys)
+    mapped = False
+    for src, (tgt, sharding) in mappings.items():
+      regex = '^' + re.escape(tgt).replace('\\.\\*', r'\.(\d+)') + '$'
+      matched = re.match(regex, path)
+      if matched:
+        # Extract wildcards if any
+        wildcards = matched.groups()
+        src_parts = []
+        wc_index = 0
+        for part in src.split('.'):
+          if part == '*':
+            src_parts.append(wildcards[wc_index])
+            wc_index += 1
+          else:
+            src_parts.append(part)
+        actual_src = '.'.join(src_parts)
+        # Check if this is a scanned parameter (has 'layer' in sharding spec)
+        if sharding and 'layer' in sharding:
+          if actual_src not in new_flat_dict:
+            new_flat_dict[actual_src] = ([], [], sharding)
+          layer_number = int(matched.groups()[0])
+          new_flat_dict[actual_src][0].append((layer_number, v))
+          new_flat_dict[actual_src][1].append((layer_number, path))
+        else:
+          # Regular (non-scanned) parameter
+          new_flat_dict[actual_src] = v, path, sharding
+
+        mapped = True
+        break
+    # There are no mappings for rng related params.
+    if not mapped:
+      logging.warning('!!! No mapping for flat state: %s', path)
+
+  # Sort layers
+  for key, (layers, paths, sharding) in new_flat_dict.items():
+    if isinstance(layers, list):
+      layers.sort(key=lambda x: x[0])
+      paths.sort(key=lambda x: x[0])
       values = [v for _, v in layers]
       paths = [p for _, p in paths]
       new_flat_dict[key] = (values, paths, sharding)
@@ -714,36 +732,6 @@ def _apply_dtype_cast(
   return val
 
 
-def _process_key_mapping(
-    key_mappings,
-) -> tuple[Dict[str, tuple[str, tuple[int, ...]]], bool]:
-  """Process key mappings and additional configs."""
-  # Check for additional configs that may require interleaved mapping, for MoE
-  # models like GPT_OSS
-  is_interleaved = False
-  if 'additional_config' in key_mappings:
-    additional_configs = key_mappings['additional_config']
-    logging.info('Additional configs: %s', additional_configs)
-    if additional_configs.get('layer_cycle_interval', 1) > 1:
-       is_interleaved = True
-  processed_mappings = key_mappings.copy()
-  # remove additional_config from key_mappings
-  del processed_mappings['additional_config']
-  return processed_mappings, is_interleaved
-
-
-def simple_reshard(values_dict, shardings_dict):
-    """Simple wrapper to force physical data movement using jax.device_put."""
-    result = {}
-    for key, val in values_dict.items():
-        target_sharding = shardings_dict.get(key)
-        if target_sharding is not None:
-            # Force the data (val) to move to the target layout (target_sharding)
-            result[key] = jax.device_put(val, target_sharding)
-        else:
-            result[key] = val
-    return result
-    
 def transfer_state_with_mappings(
     src_state,
     dst_state,
@@ -783,6 +771,7 @@ def transfer_state_with_mappings(
         )
         for key, tgt_params in tgt_flat_list
     }
+
   # Build source-to-target mapping
   key_mappings, is_interleaved = _process_key_mapping(key_mappings)
   if is_interleaved:
