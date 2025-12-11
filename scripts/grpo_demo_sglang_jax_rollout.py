@@ -6,6 +6,7 @@ training, evaluation, and inference. In addition, It is based on examples/grpo_d
 """
 
 import argparse
+from collections import defaultdict
 import csv
 import functools
 import gc
@@ -14,6 +15,7 @@ from pathlib import Path
 from pprint import pprint
 import re
 import shutil
+from typing import Any
 
 from flax import nnx
 import grain
@@ -42,6 +44,13 @@ from tunix.rl.grpo.grpo_learner import GRPOLearner
 from tunix.rl.rollout import base_rollout
 from tunix.rl.rollout import sglang_jax_rollout
 from tunix.sft import metrics_logger
+from tunix.sft import utils
+
+platform = os.getenv("JAX_PLATFORMS", None)
+if platform == "proxy":
+  import pathwaysutils
+
+  pathwaysutils.initialize()
 
 # Parse command line options
 parser = argparse.ArgumentParser(description="Arguments for GRPO demo")
@@ -52,13 +61,29 @@ parser.add_argument(
     required=False,
     help="The model version to use.",
 )
-
 parser.add_argument(
     "--rollout-data-parallel-size",
     type=int,
     default=1,
     required=False,
     help="Rollout engine data parallel size.",
+)
+parser.add_argument(
+    "--global-batch-size",
+    type=int,
+    default=4,
+    required=False,
+    help="Number of global batches for learning.",
+)
+parser.add_argument(
+    "--num-batches",
+    type=int,
+    default=1869,
+    required=False,
+    help=(
+        "Number of batches for training. Defaults to total number of samples //"
+        " global batch size."
+    ),
 )
 
 args = parser.parse_args()
@@ -113,14 +138,14 @@ BETA = 0.08
 EPSILON = 0.2
 
 # ====== Training ======
-TRAIN_MICRO_BATCH_SIZE = 1
+TRAIN_MICRO_BATCH_SIZE = 2
 # Increase `NUM_BATCHES` and `MAX_STEPS` for better results.
-NUM_BATCHES = 3738
+NUM_BATCHES = min(args.num_batches, 7473 // args.global_batch_size)
 # Keep `NUM_TEST_BATCHES` low so that evaluation runs quickly. It can be
 # increased to a max. of 330 (if batch size is 4).
-NUM_TEST_BATCHES = 2
+NUM_TEST_BATCHES = 20
 
-EVAL_EVERY_N_STEPS = 10  # this doesn't matter if `TRAIN_FRACTION = 1.0`.
+EVAL_EVERY_N_STEPS = 2  # this doesn't matter if `TRAIN_FRACTION = 1.0`.
 NUM_EPOCHS = 1  # can potentially train for more epochs
 
 # Number of training steps.
@@ -157,16 +182,7 @@ GENERATION_CONFIGS = {
     "liberal": {"temperature": 0.85, "top_k": 2000, "top_p": 1.0},
 }
 
-
-def show_hbm_usage():
-  """Displays memory usage per device."""
-  fmt_size = functools.partial(humanize.naturalsize, binary=True)
-
-  for d in jax.local_devices():
-    stats = d.memory_stats()
-    used = stats["bytes_in_use"]
-    limit = stats["bytes_limit"]
-    print(f"Using {fmt_size(used)} / {fmt_size(limit)} ({used/limit:%}) on {d}")
+show_hbm_usage = utils.show_hbm_usage
 
 
 repo_id = args.model_version
@@ -289,7 +305,7 @@ if source not in ("tfds", "kaggle"):
 print(f"Using data source: {source}")
 
 dataset = get_dataset(TRAIN_DATA_DIR, "train", source).batch(
-    TRAIN_MICRO_BATCH_SIZE
+    args.global_batch_size
 )[:NUM_BATCHES]
 
 if TRAIN_FRACTION == 1.0:
@@ -302,7 +318,7 @@ else:
   val_dataset = dataset[int(len(dataset) * TRAIN_FRACTION) :].repeat(NUM_EPOCHS)
 
 test_dataset = get_dataset(TEST_DATA_DIR, "test", source).batch(
-    TRAIN_MICRO_BATCH_SIZE
+    args.global_batch_size
 )[:NUM_TEST_BATCHES]
 
 dataset_lengths = (
@@ -354,7 +370,7 @@ download_from_huggingface(repo_id=repo_id, model_path=model_path)
 #   params = params_lib.load_and_format_params(
 #       os.path.join(kaggle_ckpt_path, "gemma2-2b-it")
 #   )
-#   gemma = gemma_lib.Transformer.from_params(params, version="2-2b-it")
+#   gemma = gemma_lib.Gemma.from_params(params, version="2-2b-it")
 #   checkpointer = ocp.StandardCheckpointer()
 #   _, state = nnx.split(gemma)
 #   checkpointer.save(os.path.join(INTERMEDIATE_CKPT_DIR, "state"), state)
@@ -369,7 +385,7 @@ download_from_huggingface(repo_id=repo_id, model_path=model_path)
 #   mesh = jax.make_mesh(*MESH, axis_types=(jax.sharding.AxisType.Auto,) * len(MESH[0]))
 #   model_config = gemma_lib.ModelConfig.gemma2_2b()
 #   abs_gemma: nnx.Module = nnx.eval_shape(
-#       lambda: gemma_lib.Transformer(model_config, rngs=nnx.Rngs(params=0))
+#       lambda: gemma_lib.Gemma(model_config, rngs=nnx.Rngs(params=0))
 #   )
 #   abs_state = nnx.state(abs_gemma)
 #   abs_state = jax.tree.map(
@@ -729,7 +745,7 @@ sglang_jax_config = sampler_lib.SglangJaxConfig(
     model_version=model_path,
     context_length=2048,
     mesh=rollout_mesh,
-    mem_fraction_static=0.3,
+    mem_fraction_static=0.5,
     init_with_random_weights=True,
     disable_radix_cache=True,
     enable_deterministic_sampling=False,

@@ -24,6 +24,7 @@ from flax import nnx
 import jax
 import jax.numpy as jnp
 import jaxtyping
+import numpy as np
 from sgl_jax.srt.entrypoints.engine import Engine
 from tunix.generate import base_sampler
 from tunix.generate import mappings
@@ -151,12 +152,7 @@ class SglangJaxSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-nam
         if (self.tokenizer.bos_id() and input_ids[0] != self.tokenizer.bos_id())
         else []
     )
-    eos_tok = (
-        [self.tokenizer.eos_id()]
-        if input_ids[-1] != self.tokenizer.eos_id()
-        else []
-    )
-    return bos_tok + input_ids + eos_tok
+    return bos_tok + input_ids
 
   def __call__(
       self,
@@ -219,18 +215,18 @@ class SglangJaxSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-nam
       max_prompt_length = utils.next_power_of_2(max_tokens_length)
     all_input_ids = [
         utils.pad_to_length(
-            jnp.array(x),
+            np.array(x, dtype=np.int32),
             target_length=max_prompt_length,
             pad_value=self.tokenizer.pad_id(),
             left=True,
         )
         for x in prompt_ids
     ]
-    all_input_ids = jnp.array(all_input_ids)
+    all_input_ids = np.array(all_input_ids, dtype=np.int32)
 
     all_output_ids = [
         utils.pad_to_length(
-            jnp.array(x["output_ids"]),
+            np.array(x["output_ids"], dtype=np.int32),
             target_length=max_generation_steps,
             pad_value=self.tokenizer.pad_id(),
             left=False,

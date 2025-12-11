@@ -1,4 +1,4 @@
-# Tunix: A JAX-native LLM Post-Training Library
+# Tunix: A lightweight LLM Post-Training Library
 
 <div align="left">
 
@@ -10,6 +10,7 @@
 post-training of Large Language Models. It provides efficient and scalable
 supports for:
 
+- **SOTA Training performance on TPUs**
 - **Supervised Fine-Tuning**
 - **Reinforcement Learning (RL)**
 - **Knowledge Distillation**
@@ -18,11 +19,11 @@ Tunix leverages the power of JAX for accelerated computation and seamless
 integration with JAX-based modeling framework
 [Flax NNX](https://flax.readthedocs.io/en/latest/nnx_basics.html).
 
-**Current Status: Early Development**
+**Current Status: Alpha Release**
 
-Tunix is in early development. We're actively working to expand its
-capabilities, usability and improve its performance. Stay tuned for upcoming
-updates and new features!
+Tunix is under active development. Our team is actively working on expanding its
+capabilities, usability and performance. Stay tuned for upcoming updates and new
+features!
 
 ## Key Features & Highlights
 
@@ -59,7 +60,7 @@ Tunix is still under development, here's a glimpse of the current features:
   - Multi-turn & multi-step support
   - Tool usage
 - **Advanced Algorithms:**
-  - Addtional state-of-the-art RL and distillation algorithms
+  - Additional state-of-the-art RL and distillation algorithms
 - **Scalability:**
   - Multi-host distributed training
   - Optimized rollout with vLLM or SGLang-Jax
@@ -160,7 +161,7 @@ check back for updates!
   title={Tunix},
   author={Bao, Tianshu and Wang, Lance and Sharma, Abheesht and Shin, Jiwon and
   Yan, Ann and Tan, Sizhi and Gao, Haoyu and Ha, Jen and Chai, Lin and
-  Liu, Dangyi and Iyer, Rakesh and Sahu, Mridul and others},
+  Liu, Dangyi and Iyer, Rakesh and Sahu, Mridul and et al.},
   year={2025},
   howpublished={\url{https://github.com/google/tunix}},
 }
