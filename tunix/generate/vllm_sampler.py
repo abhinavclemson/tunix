@@ -98,7 +98,7 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
 
     # vLLM DP only works with the new model design
     if config.data_parallel_size > 1:
-      os.environ["NEW_MODEL_DESIGN"] = "True"
+      os.environ["NEW_MODEL_DESIGN"] = "1"
 
     # tpu-inference backend recently removed this environment variable, however
     # still set it here for backward compatibility.

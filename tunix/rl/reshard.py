@@ -468,7 +468,7 @@ def reshard_pytree(
       use_experimental_pre_reshard=use_experimental_pre_reshard,
       get_reshard_fns=[
           #
-          _get_reshard_fn_pathwaysutils,
+          # _get_reshard_fn_pathwaysutils,
           _get_reshard_fn_jax_device_put,
       ],
   )
