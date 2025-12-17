@@ -23,7 +23,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from absl import logging
 import jax
-import jax.numpy as jnp
 import jaxtyping
 import numpy as np
 from tunix.generate import base_sampler
@@ -245,7 +244,12 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
         if (self.tokenizer.bos_id() and input_ids[0] != self.tokenizer.bos_id())
         else []
     )
-    return bos_tok + input_ids
+    eos_tok = (
+        [self.tokenizer.eos_id()]
+        if input_ids[-1] != self.tokenizer.eos_id()
+        else []
+    )
+    return bos_tok + input_ids + eos_tok
 
   def detokenize(
       self, input_strings: List[str], request_outputs: List[RequestOutput]
@@ -407,7 +411,6 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
         )
         for x in out_tokens[0]
     ]
-    all_output_ids = jnp.array(all_output_ids)
     # To support multisampling, just return the whole list of SamplerOutput
     return base_sampler.SamplerOutput(
         text=decoded_outputs[0],
