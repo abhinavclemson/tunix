@@ -209,6 +209,7 @@ class VllmSampler(base_sampler.BaseSampler):  # pylint: disable=invalid-name
     args["data_parallel_size"] = data_parallel_size
     args["tensor_parallel_size"] = tensor_parallel_size
     args["async_scheduling"] = config.async_scheduling
+    args["enable_expert_parallel"] = True
 
     args["additional_config"] = {}
     if config.lora_config is not None:
